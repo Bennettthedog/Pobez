@@ -645,6 +645,9 @@ function placeOnTiles(type, tiles, ignoreRange = false) {
 // isn't maxed yet goes up one level, and you pay for each). What's spent counts toward salvage.
 const maxLevel = (type) => UPGRADES[type].costs.length; // 15
 const levelOf = (b) => b.level || 0;
+// The level number players see: an un-upgraded building shows as level 1 (internal level 0),
+// so every shown level is one higher than the internal one. Only use it in text.
+const shownLv = (lv) => lv + 1;
 // How much reaching this level multiplies the building's stat (×2 unless UPGRADES[type].mult
 // says otherwise: the Turret's ×4 at 11, the Wall's ×4 at 12), and the total from level 0.
 const statMult = (type, lv) => UPGRADES[type].mult?.[lv] ?? 2;
@@ -691,7 +694,7 @@ function upgradeBlocker(plan) {
   if (plan.notYours) return 'That isn\'t yours';
   if (plan.pieces.some((x) => x.constructing)) return 'Still being built';
   if (plan.pieces.some((x) => x.upgrading)) return 'Already upgrading';
-  if (plan.coreNeeds) return `Needs a level-${plan.coreNeeds} Core`;
+  if (plan.coreNeeds) return `Needs a level-${shownLv(plan.coreNeeds)} Core`;
   if (plan.needs) return `Needs a ${BUILDINGS[plan.needs].name} first`;
   if (stone < plan.cost) return `Needs ${plan.cost} stone`;
   if (crystals < plan.crystals) return `Needs ${plan.crystals} crystals`;
@@ -715,7 +718,7 @@ function upgradeBuilding(b, variant) {
     x.paidCrystals = (x.paidCrystals || 0) + (UPGRADES[x.type].crystals?.[levelOf(x)] || 0);
   }
   const what = plan.pieces.length > 1 ? `${plan.pieces.length} wall pieces` : BUILDINGS[b.type].name;
-  toast(`Upgrading ${what} to level ${levelOf(b) + 1}: ${DEFENDER.upgradeTime}s`);
+  toast(`Upgrading ${what} to level ${shownLv(levelOf(b) + 1)}: ${DEFENDER.upgradeTime}s`);
   startWork(b, 'upgrade', DEFENDER.upgradeTime, () => finishUpgrade(b, plan.pieces, variant), plan.pieces);
 }
 function finishUpgrade(b, pieces, variant) {
@@ -735,9 +738,9 @@ function finishUpgrade(b, pieces, variant) {
   const ascended = b.type === 'townhall' && levelOf(b) === 6;
   const faster = UPGRADES[b.type].rateAt?.[levelOf(b)];
   const V = variant && UPGRADES[b.type].variants?.[variant];
-  toast(ascended ? `The Core has ascended! Level 6: ${townHallIncome(6)} stone/s`
+  toast(ascended ? `The Core has ascended! Level ${shownLv(6)}: ${townHallIncome(6)} stone/s`
     : V ? `Turret became a ${V.name}: ${V.effect}`
-      : `${what} upgraded to level ${levelOf(b)}: ${levelEffect(b, levelOf(b))}${faster ? `, +${faster} shots/s` : ''}`, ascended ? { announce: true } : {});
+      : `${what} upgraded to level ${shownLv(levelOf(b))}: ${levelEffect(b, levelOf(b))}${faster ? `, +${faster} shots/s` : ''}`, ascended ? { announce: true } : {});
   if (ascended || V) { const c = buildingCenter(b); debris.burst(c.x, c.y + (V ? 1 : 2), c.z, DEFENDER.colors[0], V ? 24 : 40); }
   checkBossTrigger(b); // a level-4 Town Hall wakes the boss
 }
@@ -747,7 +750,7 @@ function upgradeActions(b) {
     const plan = upgradePlan(b), why = upgradeBlocker(plan);
     return Object.entries(UPGRADES[b.type].variants).map(([id, V]) => ({
       label: `${V.name} ${priceShort(plan)}`, disabled: !!why,
-      title: `Level 6: turn it into a ${V.name} (${V.effect}) for ${priceLong(plan)}. You can only pick one.${why ? ` (${why})` : ''}`,
+      title: `Level ${shownLv(UPGRADES[b.type].variantLevel)}: turn it into a ${V.name} (${V.effect}) for ${priceLong(plan)}. You can only pick one.${why ? ` (${why})` : ''}`,
       run: () => upgradeBuilding(b, id),
     }));
   }
@@ -756,7 +759,7 @@ function upgradeActions(b) {
 function upgradeAction(b) {
   if (!UPGRADES[b.type]) return { label: 'Upgrade', disabled: true, title: `${BUILDINGS[b.type].name}s can't be upgraded yet` };
   const plan = upgradePlan(b);
-  if (!plan) return { label: 'Max level', disabled: true, title: `Level ${maxLevel(b.type)} is the top` };
+  if (!plan) return { label: 'Max level', disabled: true, title: `Level ${shownLv(maxLevel(b.type))} is the top` };
   const line = plan.pieces.length > 1 ? ` (${plan.pieces.length} pcs)` : '';
   const price = priceShort(plan);
   const why = upgradeBlocker(plan);
@@ -787,10 +790,10 @@ function upgradeLines(b) {
       : b.type === 'cannon' ? (b.variant === 'storm' ? `${Math.round(turretDps(b))} damage/s` : `${turretDamage(b)} damage`) : `${b.maxHp} max HP`;
   const faster = UPGRADES[b.type].rateAt?.[lv + 1];
   const next = b.type === 'townhall' ? `next: ${townHallIncome(lv + 1)} stone/s`
-    : isVariantLevel(b) ? 'next: pick a level-6 turret below'
+    : isVariantLevel(b) ? `next: pick a level-${shownLv(UPGRADES[b.type].variantLevel)} turret below`
       : `next: ${levelEffect(b, lv + 1)}${faster ? ` and +${faster} shots/s` : ''}`;
   const title = lv >= 6 ? (b.type === 'townhall' ? ' (Ascended)' : b.variant ? ` (${UPGRADES[b.type].variants[b.variant].name})` : '') : '';
-  const lines = [`Level ${lv}/${max}${title}: ${now}${lv < max ? ` (${next})` : ' (max)'}`];
+  const lines = [`Level ${shownLv(lv)}/${shownLv(max)}${title}: ${now}${lv < max ? ` (${next})` : ' (max)'}`];
   if (isVariantLevel(b)) {
     const U = UPGRADES[b.type];
     lines.push(Object.values(U.variants).map((V) => `${V.name}: ${V.effect}`).join(' · ')
@@ -799,12 +802,12 @@ function upgradeLines(b) {
   const needs = UPGRADES[b.type].requires?.[lv + 1];
   if (needs && lv < max) {
     const has = buildings.list.some((x) => x.type === needs && !x.destroyed && ownedHere(x));
-    lines.push(`Level ${lv + 1} needs a ${BUILDINGS[needs].name}${has ? ' ✓' : ''} and ${UPGRADES[b.type].crystals[lv]} crystals`);
+    lines.push(`Level ${shownLv(lv + 1)} needs a ${BUILDINGS[needs].name}${has ? ' ✓' : ''} and ${UPGRADES[b.type].crystals[lv]} crystals`);
   }
   const ahead = UPGRADES[b.type].aheadMult && lv < max && UPGRADES[b.type].costs[lv] ? levelsAhead(b) : 0;
   if (ahead) { // past the Core: the stone costs more
     const k = UPGRADES[b.type].aheadMult ** ahead;
-    lines.push(`×${k} stone: level ${lv + 1} is ${ahead === 1 ? 'one level' : `${ahead} levels`} ahead of your Core (level ${Math.max(0, bestCoreLevel())})`);
+    lines.push(`×${k} stone: level ${shownLv(lv + 1)} is ${ahead === 1 ? 'one level' : `${ahead} levels`} ahead of your Core (level ${shownLv(Math.max(0, bestCoreLevel()))})`);
   }
   return lines;
 }
@@ -941,7 +944,7 @@ function trainBlocker(b, type) {
   if (defender.dead) return `The ${defenderName} has fallen`;
   if (levelOf(b) < (cfg.barracksLevel || 0)) {
     const lv = cfg.barracksLevel, core = UPGRADES.barracks.requiresCore?.[lv];
-    return `Needs a level-${lv} Barracks${core ? ` (which needs a level-${core} Core)` : ''}`;
+    return `Needs a level-${shownLv(lv)} Barracks${core ? ` (which needs a level-${shownLv(core)} Core)` : ''}`;
   }
   if (b.constructing) return 'Still being built';
   if ((b.queue?.length || 0) >= QUEUE_MAX) return `Queue full (${QUEUE_MAX})`;
@@ -1813,7 +1816,7 @@ function checkBossTrigger(b) {
   if (!boss || !boss.dormant || bossCountdown >= 0) return;
   if (b.type !== 'townhall' || levelOf(b) < BOSS.spawnTownHallLevel) return;
   bossCountdown = BOSS.spawnDelay;
-  toast(`A Core reached level ${BOSS.spawnTownHallLevel}: the ${BOSS.name} awakens in ${BOSS.spawnDelay} seconds!`, { announce: true });
+  toast(`A Core reached level ${shownLv(BOSS.spawnTownHallLevel)}: the ${BOSS.name} awakens in ${BOSS.spawnDelay} seconds!`, { announce: true });
   // Each side's orders.
   announceTo('attacker', `Defend the ${BOSS.name}! Keep the Sentinels and their troops away from it.`);
   announceTo('defender', `Kill the ${BOSS.name}! Its crystals are your reward.`);
@@ -2736,7 +2739,7 @@ const debug = createDebugPanel(uiRoot, {
     { key: 'M', code: 'KeyM', label: 'Flat test map (seed "flat": open flat ground, the temple, a field of crystal rocks; no bases)', run: () => loadSeed('flat', keepParams()) },
     { key: 'G', code: 'KeyG', label: 'Give 30,000 of each currency: gold and platinum (Colossus), stone and crystals (defenders)', run: () => { gold += 30000; platinum += 30000; stone += 30000; crystals += 30000; toast('+30,000 gold, platinum, stone and crystals'); } },
     { key: 'T', code: 'KeyT', label: 'Teleport the selected character to the cursor', run: () => teleport(controlled, hoverTile()) },
-    { key: 'B', code: 'KeyB', label: 'Summon every building at every level around the cursor (Cores and Walls 0–15, Turrets 0–5 plus both level 6–15 forms, a Barracks and a Quarry)', run: () => spawnAllBuildings(hoverTile()) },
+    { key: 'B', code: 'KeyB', label: 'Summon every building at every level around the cursor (Cores and Walls 1–16, Turrets 1–6 plus both level 7–16 forms, a Barracks and a Quarry)', run: () => spawnAllBuildings(hoverTile()) },
     { key: 'K', code: 'KeyK', label: 'Destroy the building under the cursor', run: () => {
       const b = buildings.at(hoverTile());
       if (!b) { toast('No building there'); return; }
@@ -2974,7 +2977,7 @@ function describeTile(t) {
   const z = map.zone[t];
   if (buildings.occ[t] >= 0) {
     const b = buildings.list[buildings.occ[t]];
-    parts.push(`${BUILDINGS[b.type].name}${b.level ? ` Lv ${b.level}` : ''} ${Math.ceil(b.hp)}/${b.maxHp} HP`);
+    parts.push(`${BUILDINGS[b.type].name}${UPGRADES[b.type] ? ` Lv ${shownLv(levelOf(b))}` : ''} ${Math.ceil(b.hp)}/${b.maxHp} HP`);
   }
   if (map.rareCrystals.has(t)) parts.push('sunstone crystal (rare)');
   else if (map.crystals.includes(t)) parts.push('crystal rock');
@@ -2993,7 +2996,7 @@ function describeTile(t) {
   else if (z === ZONE.FOREST) parts.push('pine grove (impassable)');
   else if (z === ZONE.BOSS) {
     if (boss && Math.hypot(t % S + 0.5 - boss.x, ((t / S) | 0) + 0.5 - boss.z) < boss.radius + 0.6) {
-      parts.push(boss.dormant ? 'boss lair (empty: the boss appears when a Core reaches level 4)'
+      parts.push(boss.dormant ? `boss lair (empty: the boss appears when a Core reaches level ${shownLv(BOSS.spawnTownHallLevel)})`
         : boss.dead ? `${BOSS.name} (shattered)` : `${BOSS.name} ${Math.ceil(boss.hp)}/${boss.maxHp} HP (boss)`);
     } else if (map.boss.pads.includes(t)) parts.push('boss arena · turret pad (turrets only)');
     else parts.push('boss arena (only turrets, on the pads)');
