@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Colossus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Cinzel+Decorative:wght@900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="game"></div>
+
+  <!-- The HUD is built by src/ui/*.js into #ui. -->
+  <div id="ui">
+    <div id="topbar" class="hud">
+      <span class="logo">COLOSSUS</span>
+      <span class="seed">seed <b id="seed-label"></b></span>
+      <span id="hover-info"></span>
+      <a id="mp-link" class="mp-link" href="?lobby" title="Host a multiplayer game (others join with your room code or invite link)">Multiplayer</a>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
