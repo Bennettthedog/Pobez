@@ -25,7 +25,13 @@ import { NET } from './config.js';
 // NETMODE: 'solo' (one browser plays both sides, as before), 'host' (this browser runs the real
 // game and sends it to the others) or 'client' (shows the host's game, sends its clicks).
 const params = new URLSearchParams(location.search);
-const session = params.has('lobby') || params.has('join') ? await runLobby(params) : null;
+// The page opens on the multiplayer lobby (hosting a room, or ?join=CODE). Solo play is ?solo
+// (a ?seed=… link is solo too).
+const playSolo = params.has('solo') || params.has('seed');
+const session = playSolo ? null : await runLobby(params);
+// Debug tools (the debug panel's commands, ?god=1, ?fog=0) only work when the game runs from
+// the developer's own computer (localhost), never from the published site.
+const DEBUG_ALLOWED = ['localhost', '127.0.0.1', '[::1]', ''].includes(location.hostname);
 const NETMODE = session ? session.mode : 'solo';
 const isClient = NETMODE === 'client', isHost = NETMODE === 'host', multiplayer = !!session;
 const myRole = session ? session.role : null;           // 'attacker' | 'defender' | 'spectator'
@@ -33,7 +39,7 @@ const spectating = myRole === 'spectator';
 
 // ---- Seed: from the URL (?seed=abc) so maps can be shared, or a fresh random one. ----
 const seed = session ? session.seed : params.get('seed') || randomSeed();
-if (!session && !params.get('seed')) history.replaceState(null, '', `?seed=${encodeURIComponent(seed)}`);
+if (!session && !params.get('seed')) history.replaceState(null, '', `?solo&seed=${encodeURIComponent(seed)}`);
 document.getElementById('seed-label').textContent = seed;
 if (session) document.getElementById('mp-link').hidden = true;
 if (session) { // who you are, next to the seed
@@ -230,7 +236,7 @@ if (params.get('zoom')) cam.zoom = Math.max(0.45, Math.min(8, Number(params.get(
 const vis = new Uint8Array(map.size * map.size);
 let defVis = mySentinel.vis; // the acting Defender's sight (each has their own; see useSentinel)
 const shownVis = () => (controlled === attacker ? vis : defVis);
-let fogEnabled = params.get('fog') !== '0' && !spectating; // ?fog=0 starts with fog off (debug); spectators see all
+let fogEnabled = !(params.get('fog') === '0' && DEBUG_ALLOWED) && !spectating; // ?fog=0 starts with fog off (debug, local only); spectators see all
 // What this screen's player sees right now (their side's sight), or null for everything. Unlike
 // shownVis() it doesn't change while the host runs another player's command or Sentinel.
 const viewVis = () => {
@@ -246,7 +252,7 @@ function seesNow(x, z) {
 }
 // Debug: the player characters (the Colossus and the Sentinel) take no damage. Debug command
 // Y toggles it; ?god=1 starts with it on.
-let godMode = params.get('god') === '1';
+let godMode = params.get('god') === '1' && DEBUG_ALLOWED;
 function setGodMode(on) {
   godMode = on;
   toast(on ? 'Invincible: the Colossus and the Sentinel take no damage' : 'Invincible off');
@@ -2648,9 +2654,9 @@ window.addEventListener('keydown', (e) => {
   else if (e.code === 'KeyX' && controlled === attacker) armAttackMove();
   else if (e.code === 'KeyR' && controlled === attacker) recall();
   // The Colossus's abilities (F and G are debug commands while the debug panel is open).
-  else if (e.code === 'KeyF' && controlled === attacker && !debug.isOpen()) hiddenDancingBlade();
-  else if (e.code === 'KeyG' && controlled === attacker && !debug.isOpen()) armGlimpse();
-  else if (e.code === 'KeyF' && controlled === defender && !debug.isOpen()) armBlink(); // the Sentinel's Blink
+  else if (e.code === 'KeyF' && controlled === attacker && !(DEBUG_ALLOWED && debug.isOpen())) hiddenDancingBlade();
+  else if (e.code === 'KeyG' && controlled === attacker && !(DEBUG_ALLOWED && debug.isOpen())) armGlimpse();
+  else if (e.code === 'KeyF' && controlled === defender && !(DEBUG_ALLOWED && debug.isOpen())) armBlink(); // the Sentinel's Blink
   else if (e.code === 'KeyZ' && controlled === defender) toggleAutoRepair();
   else if (e.code === 'Space') { e.preventDefault(); cam.target.set(controlled.x, 0, controlled.z); }
   else if (e.code === 'KeyC') switchControl();
@@ -2658,7 +2664,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---- Debug panel and commands ----
-const loadSeed = (s, extra = '') => { location.search = `?seed=${encodeURIComponent(s)}${extra}`; };
+const loadSeed = (s, extra = '') => { location.search = `?solo&seed=${encodeURIComponent(s)}${extra}`; };
 const keepParams = () => ['control', 'defender', 'fog', 'debug', 'god'].filter((k) => params.get(k)).map((k) => `&${k}=${params.get(k)}`).join('');
 function teleport(unit, tile) {
   if (tile < 0 || map.isBlocked(tile) || buildings.occ[tile] !== -1) { toast('Can\'t teleport there'); return; }
@@ -2708,6 +2714,7 @@ function spawnAllBuildings(tile) {
 const hoverTile = () => (hover ? hover.tile : -1);
 const debug = createDebugPanel(uiRoot, {
   seed,
+  locked: !DEBUG_ALLOWED, // the published site: only the list of keys, no debug commands
   onLoadSeed: (s) => loadSeed(s, keepParams()),
   onNewMap: () => loadSeed(randomSeed(), keepParams()),
   commands: [
@@ -2779,7 +2786,7 @@ const debug = createDebugPanel(uiRoot, {
   ],
 });
 
-if (params.get('debug') === '1') debug.toggle(); // ?debug=1 opens the panel at startup
+if (params.get('debug') === '1' && DEBUG_ALLOWED) debug.toggle(); // ?debug=1 opens the panel at startup (local only)
 
 // ---- Minimap ----
 minimap = new Minimap(uiRoot, map, {

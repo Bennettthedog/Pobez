@@ -6,8 +6,9 @@
 // PeerJS service, which only introduces the browsers to each other. `?net=local` instead
 // connects tabs of one browser on one computer (BroadcastChannel), for testing.
 //
-// URL options: ?lobby (host a new room) or ?lobby=CODE (host with that code), ?join=CODE (join
-// one), and for quick testing &name=…&role=attacker|defender|spectator&ready=1 fill the form in.
+// The page opens here, hosting a new room (or ?lobby=CODE to host with that code); ?join=CODE
+// joins one (or type the code into the lobby's Join box). For quick testing,
+// &name=…&role=attacker|defender|spectator&ready=1 fill the form in. ?solo skips it.
 import { NET } from './config.js';
 
 export const ROLES = {
@@ -109,7 +110,7 @@ function localNet(code, isHost) {
 // ---- The lobby ----
 // Resolves when the game starts with { mode: 'host' | 'client', net, me, role, name, seed, players }.
 export function runLobby(params) {
-  const hosting = params.has('lobby');
+  const hosting = !params.has('join'); // the page opens on hosting a room
   const code = ((hosting ? params.get('lobby') : params.get('join')) || randomCode()).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || randomCode();
   const local = params.get('net') === 'local';
   const ui = lobbyUi(hosting, code);
@@ -249,11 +250,22 @@ function lobbyUi(hosting, code) {
       <div class="lobby-countdown" data-k="countdown"></div>
       <div class="lobby-status" data-k="status"></div>
       <ul class="lobby-players" data-k="players"></ul>
-      <div class="lobby-foot"><a href="${location.pathname}">Play solo instead</a></div>
+      <form class="lobby-join" data-k="joinForm">
+        <span>${hosting ? 'Have a code from a friend?' : 'Joining a different room?'}</span>
+        <input data-k="joinCode" maxlength="8" placeholder="Room code" autocomplete="off" aria-label="Room code to join" />
+        <button type="submit">Join</button>
+      </form>
+      <div class="lobby-foot"><a href="${location.pathname}?solo">Play solo instead</a></div>
     </div>`;
   document.body.appendChild(root);
   const q = (k) => root.querySelector(`[data-k="${k}"]`);
   let mine = null, onChange = null;
+  // Join another room by its code (leaves this one).
+  q('joinForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const c = q('joinCode').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (c) location.href = `${location.pathname}?join=${c}`;
+  });
   q('copy').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(link); q('copy').textContent = 'Copied!'; } catch { q('copy').textContent = link; }
     setTimeout(() => { q('copy').textContent = 'Copy invite link'; }, 2000);

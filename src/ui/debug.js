@@ -3,30 +3,37 @@
 import { el, setText, ICONS } from './dom.js';
 
 // commands: [{ key: 'G', code: 'KeyG', label, run }], always: [{ key, label }] (shown, handled elsewhere)
-export function createDebugPanel(root, { seed, onLoadSeed, onNewMap, commands, always }) {
-  const toggleBtn = el('button', 'hud debug-toggle', `${ICONS.bug}<span>Debug</span><kbd>\`</kbd>`);
-  toggleBtn.title = 'Debug panel (`)';
+// locked: no debug commands or seed loading (the game isn't running on the developer's own
+// computer): the panel is just the list of keys.
+export function createDebugPanel(root, { seed, onLoadSeed, onNewMap, commands, always, locked = false }) {
+  if (locked) commands = [];
+  const toggleBtn = el('button', 'hud debug-toggle', `${ICONS.bug}<span>${locked ? 'Keys' : 'Debug'}</span><kbd>\`</kbd>`);
+  toggleBtn.title = locked ? 'The game\'s keys (`)' : 'Debug panel (`)';
   const fps = el('div', 'hud fps');
   fps.hidden = true;
   const panel = el('section', 'hud debug-panel');
   panel.hidden = true;
   panel.innerHTML = `
-    <h3>${ICONS.bug} Debug</h3>
+    <h3>${ICONS.bug} ${locked ? 'Keys' : 'Debug'}</h3>
     <div class="dbg-seed">
       <label>Seed <b data-k="seed"></b></label>
-      <div class="dbg-row"><input data-k="input" placeholder="seed" maxlength="24"><button data-k="load">Load</button><button data-k="new">New map</button></div>
+      <div class="dbg-row" ${locked ? 'hidden' : ''}><input data-k="input" placeholder="seed" maxlength="24"><button data-k="load">Load</button><button data-k="new">New map</button></div>
     </div>
-    <h4>Commands <small>(keys work while this panel is open)</small></h4>
-    <table class="dbg-cmds"><tbody data-k="cmds"></tbody></table>
-    <h4>Always available</h4>
+    <div ${locked ? 'hidden' : ''}>
+      <h4>Commands <small>(keys work while this panel is open)</small></h4>
+      <table class="dbg-cmds"><tbody data-k="cmds"></tbody></table>
+    </div>
+    <h4>${locked ? 'Keys' : 'Always available'}</h4>
     <table class="dbg-cmds"><tbody data-k="always"></tbody></table>`;
   root.append(toggleBtn, fps, panel);
   const q = (k) => panel.querySelector(`[data-k="${k}"]`);
   setText(q('seed'), seed);
   const input = q('input');
-  q('load').addEventListener('click', () => { if (input.value.trim()) onLoadSeed(input.value.trim()); });
-  q('new').addEventListener('click', onNewMap);
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && input.value.trim()) onLoadSeed(input.value.trim()); });
+  if (!locked) {
+    q('load').addEventListener('click', () => { if (input.value.trim()) onLoadSeed(input.value.trim()); });
+    q('new').addEventListener('click', onNewMap);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && input.value.trim()) onLoadSeed(input.value.trim()); });
+  }
 
   for (const c of commands) {
     const row = el('tr', 'dbg-cmd', `<td><kbd>${c.key}</kbd></td><td>${c.label}</td>`);
