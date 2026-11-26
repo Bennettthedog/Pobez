@@ -59,13 +59,19 @@ function nearestWalkable(map, occ, goal, maxR) {
 }
 
 // Returns the list of tiles to walk through (excluding start), or null if unreachable.
-export function findPath(map, occ, start, goal) {
+// closest: if the goal can't be reached (walled in, up a cliff with no way up), go to the
+// reachable tile nearest to it instead (straight-line distance).
+export function findPath(map, occ, start, goal, { closest = false } = {}) {
   const S = map.size, n = S * S;
+  const want = goal;
   if (!isWalkable(map, occ, goal)) {
     goal = nearestWalkable(map, occ, goal, 4);
-    if (goal < 0) return null;
+    if (goal < 0) { if (!closest) return null; goal = want; }
   }
   if (start === goal) return [];
+  const wi = want % S, wj = (want / S) | 0;
+  const away = (t) => Math.hypot(t % S - wi, ((t / S) | 0) - wj);
+  let best = start, bestAway = away(start);
 
   const g = new Float32Array(n).fill(Infinity);
   const came = new Int32Array(n).fill(-1);
@@ -85,6 +91,10 @@ export function findPath(map, occ, start, goal) {
     if (cur === goal) break;
     if (closed[cur]) continue;
     closed[cur] = 1;
+    if (closest) { // the reachable tile nearest the goal so far
+      const a = away(cur);
+      if (a < bestAway - 1e-6) { best = cur; bestAway = a; }
+    }
     const ci = cur % S, cj = (cur / S) | 0;
     for (const [dx, dz, cost] of NEIGH) {
       const ni = ci + dx, nj = cj + dz;
@@ -101,7 +111,11 @@ export function findPath(map, occ, start, goal) {
       if (ng < g[nb]) { g[nb] = ng; came[nb] = cur; heap.push(nb, ng + h(nb)); }
     }
   }
-  if (came[goal] < 0) return null;
+  if (came[goal] < 0) {
+    if (!closest) return null;
+    goal = best; // the goal itself is out of reach
+    if (goal === start) return [];
+  }
   const path = [];
   for (let t = goal; t !== start; t = came[t]) path.push(t);
   return path.reverse();

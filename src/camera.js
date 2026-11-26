@@ -4,6 +4,7 @@ const FRUSTUM = 30;          // world units visible vertically at zoom 1
 const PITCH = THREE.MathUtils.degToRad(55);
 const DISTANCE = 80;
 const PAN_SPEED = 22;
+const EDGE = 14;             // edge scrolling: pixels from the screen edge where the camera pans
 
 // Angled top-down RTS camera: orthographic, pans on the ground plane, rotates in 90° steps.
 export class CameraController {
@@ -16,9 +17,17 @@ export class CameraController {
     this.zoom = 1;
     this.keys = new Set();
     this.dragging = false;
+    this.mouse = null; // where the mouse is (for edge scrolling), or null when it's off the window
+
+    // Edge scrolling: the camera pans while the mouse is at the edge of the screen.
+    window.addEventListener('pointermove', (e) => { this.mouse = { x: e.clientX, y: e.clientY }; });
+    document.addEventListener('mouseleave', () => { this.mouse = null; });
+    document.addEventListener('mouseout', (e) => { if (!e.relatedTarget) this.mouse = null; });
+    window.addEventListener('blur', () => { this.mouse = null; });
 
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement) return;
+      if (e.ctrlKey || e.metaKey) return; // shortcuts like Ctrl+A don't pan the camera
       this.keys.add(e.code);
       if (e.code === 'KeyQ') this.targetYaw -= Math.PI / 2;
       if (e.code === 'KeyE') this.targetYaw += Math.PI / 2;
@@ -64,10 +73,15 @@ export class CameraController {
   update(dt, bounds) {
     const { forward, right } = this.axes();
     const k = this.keys, speed = (PAN_SPEED / this.zoom) * dt;
-    if (k.has('KeyW') || k.has('ArrowUp')) this.target.addScaledVector(forward, speed);
-    if (k.has('KeyS') || k.has('ArrowDown')) this.target.addScaledVector(forward, -speed);
-    if (k.has('KeyD') || k.has('ArrowRight')) this.target.addScaledVector(right, speed);
-    if (k.has('KeyA') || k.has('ArrowLeft')) this.target.addScaledVector(right, -speed);
+    // The mouse at a screen edge (or the arrow keys) pans that way.
+    const m = !this.dragging && document.hasFocus() ? this.mouse : null;
+    const W = window.innerWidth, H = window.innerHeight;
+    const up = k.has('ArrowUp') || (m && m.y <= EDGE), down = k.has('ArrowDown') || (m && m.y >= H - 1 - EDGE);
+    const rt = k.has('ArrowRight') || (m && m.x >= W - 1 - EDGE), lt = k.has('ArrowLeft') || (m && m.x <= EDGE);
+    if (up) this.target.addScaledVector(forward, speed);
+    if (down) this.target.addScaledVector(forward, -speed);
+    if (rt) this.target.addScaledVector(right, speed);
+    if (lt) this.target.addScaledVector(right, -speed);
     this.target.x = THREE.MathUtils.clamp(this.target.x, 0, bounds);
     this.target.z = THREE.MathUtils.clamp(this.target.z, 0, bounds);
 

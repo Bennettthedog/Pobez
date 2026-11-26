@@ -193,9 +193,10 @@ export class Troops {
     return fallback;
   }
 
-  // n walkable tiles around a goal, connected to it (a loose formation).
-  formation(goal, n) {
-    const { map, occ } = this, S = map.size;
+  // n walkable tiles around a goal, connected to it (a loose formation). who: a troop whose
+  // owner's walls count as open ground (null: every wall blocks).
+  formation(goal, n, who = null) {
+    const { map } = this, occ = this.occFor(who), S = map.size;
     let start = goal;
     if (!isWalkable(map, occ, start)) {
       start = -1;
@@ -226,7 +227,7 @@ export class Troops {
   orderMove(units, tile) {
     units = units.filter((u) => !u.dead);
     if (!units.length || tile < 0) return 0;
-    const S = this.map.size, slots = this.formation(tile, units.length);
+    const S = this.map.size, slots = this.formation(tile, units.length, units[0]);
     const gx = tile % S + 0.5, gz = ((tile / S) | 0) + 0.5;
     units.sort((a, b) => Math.hypot(a.x - gx, a.z - gz) - Math.hypot(b.x - gx, b.z - gz));
     let ok = 0;

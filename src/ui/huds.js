@@ -382,7 +382,7 @@ export function createEndBanner(root) {
 export function createResourceBar(root) {
   const bar = el('div', 'hud resource-bar');
   bar.innerHTML = `
-    <div class="res res-gold" data-role="attacker" title="Gold: earned by damaging buildings">${ICONS.gold}<span data-k="gold">0</span></div>
+    <div class="res res-gold" data-role="attacker" title="Gold: earned by damaging buildings, plus a little every second">${ICONS.gold}<span data-k="gold">0</span></div>
     <div class="res res-plat" data-role="attacker" data-k="platBox" title="Platinum: for items XI-XV. Trade gold for it in the temple shop (${PLATINUM.rate} gold = 1 platinum).">${ICONS.platinum}<span data-k="platinum">0</span></div>
     <div class="res res-stone" data-role="defender" title="Stone (basic currency): your Core makes it">${ICONS.stone}<span data-k="stone">0</span><small data-k="stoneRate"></small></div>
     <div class="res res-crystal" data-role="defender" title="Crystals (the rare currency): mined by Quarry workers, and every defender gets some when the boss dies.">${ICONS.crystal}<span data-k="crystals">0</span><small data-k="crystalRate"></small></div>
