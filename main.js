@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ATTACKER, BUILDINGS, WATCHSTONES, DEFENDER, LEVEL_HEIGHT, LEVEL_MAX, TUNNELS, TUNNEL_GLOW, UPGRADES, SHOP, TROOPS, BOSS, INVENTORY_SLOTS, REGEN_DELAY, QUARRY_WORKERS, MAX_UPGRADE_LEVEL, ROMAN, itemTierName, itemCurrency, PLATINUM } from './config.js';
+import { ATTACKER, BUILDINGS, WATCHSTONES, DEFENDER, LEVEL_HEIGHT, LEVEL_MAX, TUNNELS, TUNNEL_GLOW, UPGRADES, SHOP, TROOPS, BOSS, INVENTORY_SLOTS, GOLD_PER_DAMAGE, REGEN_DELAY, QUARRY_WORKERS, MAX_UPGRADE_LEVEL, ROMAN, itemTierName, itemCurrency, PLATINUM } from './config.js';
 import { Troops } from './troops.js';
 import { Workers } from './workers.js';
 import { Boss } from './boss.js';
@@ -109,6 +109,8 @@ function templeSpot(k, n) {
   }
   return best >= 0 ? best : homeTile;
 }
+// The Defenders are allies: they all share one sight (each Sentinel's slot points at it).
+const teamVis = new Uint8Array(map.size * map.size);
 const defenderPlayers = multiplayer ? session.players.filter((p) => p.role === 'defender') : [{ id: 'solo', name: '' }];
 // Each Defender is completely separate: their own Sentinel, buildings, stone and crystals,
 // troops, helpers, limits and sight, in their own team color (DEFENDER.colors, in join order).
@@ -119,7 +121,7 @@ const sentinels = defenderPlayers.map((p, k) => {
   unit.hp = unit.maxHp = DEFENDER.hp;
   return { id: p.id, owner: p.id, name: p.name, color, unit, repair: null, repairRepath: 0, tunnelTrip: null, tunnelCooldown: 0,
     blinkCd: 0, autoRepair: DEFENDER.autoRepair.on, autoRepairTimer: 0, autoRepairSkip: new Map(), fx: null, bar: null, target: null,
-    stone: 0, crystals: 0, vis: new Uint8Array(map.size * map.size) };
+    stone: 0, crystals: 0, vis: teamVis };
 });
 // The Sentinel this screen plays (or the first one, for the Colossus's and spectators' screens).
 const mySentinel = sentinels.find((s) => s.owner === (multiplayer ? session.me : 'solo')) || sentinels[0];
@@ -270,7 +272,8 @@ const knownOcc = buildings.occ.slice();
 
 function replan() {
   if (attacker.goal < 0) return;
-  const path = findPath(map, knownOcc, attacker.tile, attacker.goal);
+  // Blocked off now? Then as close as it can get (it keeps the goal, for when a way opens).
+  const path = findPath(map, knownOcc, attacker.tile, attacker.goal, { closest: !attacker.target });
   attacker.setPath(path || [], attacker.goal);
 }
 const pathBlocked = () => attacker.path.some((t) => knownOcc[t] !== -1);
@@ -380,21 +383,21 @@ function updateVision(force = false) {
   if (controlled === attacker) { refreshFog(); minimap?.markDirty(); }
   learn(allTiles);
 }
-// Each Defender sees around their own Sentinel, troops, helpers and buildings (their own sight,
-// in their slot's vis). Recomputed when one of their units changes tile or a building changes.
+// The Defenders share one sight (teamVis): every Sentinel, troop, helper and building of any
+// Defender sees for all of them. Recomputed when one of their units changes tile or a building changes.
+let teamVisKey = '';
 function updateDefVision(force = false) {
   const S = map.size;
   let changed = false;
-  for (const s of sentinels) {
-    const own = (x) => (x.owner ?? sentinels[0].id) === s.id;
-    const blds = buildings.list.filter((b) => !b.destroyed && own(b));
-    const live = troops.alive.filter(own), crew = workers.alive.filter(own);
-    const key = `${s.unit.tile}:${buildings.list.length}:${blds.length}:${live.map((u) => u.tile).join(',')}:${crew.map((w) => w.tile).join(',')}`;
-    if (!force && key === s.visKey) continue;
-    s.visKey = key;
-    changed ||= s === mySentinel;
-    const v = s.vis;
-    computeVision(map, s.unit.x, s.unit.z, DEFENDER.visionRadius, v);
+  {
+    const blds = buildings.list.filter((b) => !b.destroyed);
+    const live = troops.alive, crew = workers.alive;
+    const key = `${sentinels.map((s) => s.unit.tile).join(',')}:${buildings.list.length}:${blds.length}:${live.map((u) => u.tile).join(',')}:${crew.map((w) => w.tile).join(',')}`;
+    if (force || key !== teamVisKey) {
+    teamVisKey = key;
+    changed = true;
+    const v = teamVis;
+    sentinels.forEach((s, k) => computeVision(map, s.unit.x, s.unit.z, DEFENDER.visionRadius, v, k === 0)); // (the first one starts afresh)
     for (const u of live) computeVision(map, u.x, u.z, u.cfg.vision, v, false); // troops see too
     for (const w of crew) computeVision(map, w.x, w.z, QUARRY_WORKERS.vision, v, false); // and quarry workers
     for (const b of blds) {
@@ -402,6 +405,7 @@ function updateDefVision(force = false) {
       const z = b.tiles.reduce((a, t) => a + ((t / S) | 0) + 0.5, 0) / b.tiles.length;
       computeVision(map, x, z, BUILDINGS[b.type].vision, v, false);
       for (const t of b.tiles) v[t] = 2; // always sees itself
+    }
     }
   }
   if (changed && controlled !== attacker) { refreshFog(); minimap?.markDirty(); }
@@ -1298,6 +1302,11 @@ const held = (kind) => inventory.filter((it) => it && it.kind === kind);
 // The value of the best item of this kind you hold (only the best one counts), or `none`.
 const best = (kind, none) => Math.max(none, ...held(kind).map((it) => shopItem(kind).values[it.tier - 1]));
 const colossusDamage = () => best('damage', ATTACKER.damage);  // Heavy Fists: damage per hit
+// Gold for dealing this much damage: extra early on (GOLD_PER_DAMAGE, by the best Fists tier held).
+function goldFor(dealt) {
+  const tier = Math.max(0, ...held('damage').map((it) => it.tier));
+  return Math.round(dealt * (GOLD_PER_DAMAGE[tier] ?? 1)); // whole gold
+}
 const colossusArmor = () => best('armor', 0);                  // Stone Armor
 const colossusRegen = () => best('regen', 0);                  // Regen Core (out of combat)
 const colossusMaxHp = () => ATTACKER.hp + best('maxHp', 0);    // Titan Heart
@@ -1639,7 +1648,7 @@ function landHit() {
     return;
   }
   const dealt = buildings.damage(b, colossusDamage());
-  gold += dealt;
+  gold += goldFor(dealt);
   const S = map.size, x = tile % S + 0.5, z = ((tile / S) | 0) + 0.5;
   splashTroops(x, z, null);
   debris.burst(x, buildings.groundY(tile) + 0.5, z, b.type === 'wall' ? 0xb7ab8e : 0x9c8f7a, b.destroyed ? 26 : 10);
@@ -1664,7 +1673,7 @@ function armAttackMove(on = !attackMoveArmed) {
 function orderAttackMove(tile) {
   armAttackMove(false);
   if (attacker.dead || tile < 0 || colossusWaiting()) return;
-  const path = findPath(map, knownOcc, attacker.tile, tile);
+  const path = findPath(map, knownOcc, attacker.tile, tile, { closest: true }); // no way there: as close as it can
   if (!path) { toast('Can\'t get there'); return; }
   const goal = path.length ? path[path.length - 1] : attacker.tile;
   attacker.target = null;
@@ -1721,7 +1730,7 @@ function updateAttackMove(dt) {
   if (attacker.path.length) return;
   if (attacker.tile === attackMove.goal) { attackMove = null; return; } // arrived
   // Finished a fight (or got stopped): carry on to the spot.
-  const path = findPath(map, knownOcc, attacker.tile, attackMove.goal);
+  const path = findPath(map, knownOcc, attacker.tile, attackMove.goal, { closest: true });
   if (path && path.length) attacker.setPath(path, attackMove.goal); else attackMove = null;
 }
 
@@ -1757,7 +1766,7 @@ function troopTarget(u) {
 }
 function hitTroop(u, damage) {
   const dealt = troops.damage(u, damage);
-  gold += dealt;
+  gold += goldFor(dealt);
   const y = map.heightAt(u.x, u.z) + 0.4;
   debris.burst(u.x, y, u.z, 0x857d70, u.dead ? 16 : 6);
   if (u.dead) selUnits.delete(u);
@@ -1778,7 +1787,7 @@ function workerTarget(w) {
 }
 function hitWorker(w, damage) {
   const dealt = workers.damage(w, damage);
-  gold += dealt;
+  gold += goldFor(dealt);
   debris.burst(w.x, map.heightAt(w.x, w.z) + 0.4, w.z, w.def.glow, w.dead ? 16 : 6);
   if (w.dead) toast(`The ${w.name} was destroyed`, { html: `The ${workerNameHtml(w.def)} was destroyed` });
 }
@@ -1925,7 +1934,7 @@ function hitSentinel(damage, byColossus = true) {
   if (defender.dead) return;
   const dealt = godMode ? 0 : Math.min(defender.hp, damage); // debug: invincible (still flinches)
   defender.hp -= dealt;
-  if (byColossus) gold += dealt;
+  if (byColossus) gold += goldFor(dealt);
   defender.flinch();
   const y = map.heightAt(defender.x, defender.z) + 0.6;
   debris.burst(defender.x, y, defender.z, 0x857d70, defender.hp <= 0 ? 30 : 12);
@@ -1944,7 +1953,7 @@ function hitSentinel(damage, byColossus = true) {
       text: 'The Colossus wins. The defenders lose when every Sentinel is destroyed.',
       buttons: [
         { label: 'New map', run: () => loadSeed(randomSeed(), keepParams()) },
-        { label: 'Revive (debug)', run: reviveSentinel },
+        ...(DEBUG_ALLOWED ? [{ label: 'Revive (debug)', run: reviveSentinel }] : []), // local testing only
       ],
     });
   }
@@ -2169,7 +2178,7 @@ function killColossus() {
     text: 'The defenders win. The Colossus had a single life.',
     buttons: [
       { label: 'New map', run: () => loadSeed(randomSeed(), keepParams()) },
-      { label: 'Revive (debug)', run: reviveColossus },
+      ...(DEBUG_ALLOWED ? [{ label: 'Revive (debug)', run: reviveColossus }] : []), // local testing only
     ],
   });
 }
@@ -2516,7 +2525,8 @@ function commandAt(tile) {
     tunnelTrip = null;
   }
   // The Colossus plans from what it has seen; the defender knows its own map.
-  const path = findPath(map, unit === attacker ? knownOcc : buildings.occ, unit.tile, tile);
+  // If there's no way to that spot, walk to the closest point that can be reached.
+  const path = findPath(map, unit === attacker ? knownOcc : buildings.occ, unit.tile, tile, { closest: true });
   if (path) {
     unit.setPath(path, path.length ? path[path.length - 1] : unit.tile);
     const S = map.size, end = path.length ? path[path.length - 1] : unit.tile;
@@ -2643,6 +2653,34 @@ function clickSelect(px, py, add) {
 }
 
 // ---- Keyboard ----
+// R / K (defender): upgrade / salvage the selected building, like its info-panel buttons.
+function hotkeyBuilding(verb) {
+  const b = selected;
+  if (b && !b.destroyed && !b.isUnit && ownedByMe(b)) return b;
+  toast(`Select one of your buildings to ${verb} it`);
+  return null;
+}
+function hotkeyUpgrade() {
+  const b = hotkeyBuilding('upgrade');
+  if (!b) return;
+  if (!UPGRADES[b.type]) { toast(`${BUILDINGS[b.type].name}s can't be upgraded`); return; }
+  if (!upgradePlan(b)) { toast('Already at the top level'); return; }
+  if (isVariantLevel(b)) { // a choice: made with the panel's buttons
+    toast(`Pick its next form in the panel: ${Object.values(UPGRADES[b.type].variants).map((V) => V.name).join(' or ')}`);
+    return;
+  }
+  upgradeBuilding(b);
+}
+function hotkeySalvage() {
+  const b = hotkeyBuilding('salvage');
+  if (!b) return;
+  toggleSalvage(b);
+}
+// Start salvaging, or cancel a salvage under way (decided on the host, which knows which).
+function toggleSalvage(b) {
+  if (!b || b.destroyed) return;
+  if (salvaging.has(b)) cancelSalvage(b); else startSalvage(b);
+}
 const BUILD_KEYS = { Digit1: 'townhall', Digit2: 'barracks', Digit3: 'cannon', Digit4: 'quarry', Digit5: 'wall' };
 function switchControl() {
   if (multiplayer) { toast('In a multiplayer game you play the role you picked in the lobby'); return; }
@@ -2674,6 +2712,14 @@ window.addEventListener('keydown', (e) => {
   else if (e.code === 'KeyG' && controlled === attacker && !(DEBUG_ALLOWED && debug.isOpen())) armGlimpse();
   else if (e.code === 'KeyF' && controlled === defender && !(DEBUG_ALLOWED && debug.isOpen())) armBlink(); // the Sentinel's Blink
   else if (e.code === 'KeyZ' && controlled === defender) toggleAutoRepair();
+  else if (e.code === 'KeyA' && (e.ctrlKey || e.metaKey) && controlled === defender) { // every one of your troops
+    e.preventDefault();
+    const mine = troops.alive.filter(ownedByMe);
+    if (!mine.length) { toast('You have no troops'); return; }
+    select(null); setUnitSelection(mine);
+  }
+  else if (e.code === 'KeyR' && controlled === defender) hotkeyUpgrade();
+  else if (e.code === 'KeyK' && controlled === defender && !(DEBUG_ALLOWED && debug.isOpen())) hotkeySalvage(); // (K is a debug command while the panel is open)
   else if (e.code === 'Space') { e.preventDefault(); cam.target.set(controlled.x, 0, controlled.z); }
   else if (e.code === 'KeyC') switchControl();
   else if (e.code === 'Tab') { e.preventDefault(); toggleFog(); }
@@ -2786,7 +2832,7 @@ const debug = createDebugPanel(uiRoot, {
     { key: 'Tab', label: 'Fog of war on / off' },
     { key: 'C', label: 'Switch between the Colossus and the defender' },
     { key: 'Space', label: 'Center the camera on the selected character' },
-    { key: 'WASD', label: 'Pan the camera (also arrows / middle-drag)' },
+    { key: 'Mouse to edge', label: 'Pan the camera (also arrow keys / middle-drag)' },
     { key: 'Q / E', label: 'Rotate the camera · Scroll: zoom' },
     { key: 'R-click', label: 'Move / attack (Colossus) / repair a damaged building or use a tunnel (defender); selected troops move or attack the Colossus; with a Barracks selected, sets its rally point; also on the minimap' },
     { key: 'X', label: 'Colossus: attack move, then click where to go (Esc / right-click cancels)' },
@@ -2795,9 +2841,11 @@ const debug = createDebugPanel(uiRoot, {
     { key: 'G', label: `Colossus: ${ATTACKER.glimpse.name}, then click a spot to see round it for ${ATTACKER.glimpse.duration}s (${ATTACKER.glimpse.cooldown} s cooldown)` },
     { key: 'O', label: 'Colossus: open / close the temple shop (1–6 pick a kind of item, click a tier to buy, click an inventory slot to sell; Esc closes)' },
     { key: 'Z', label: 'Sentinel: auto-repair on / off' },
+    { key: 'R', label: 'Defender: upgrade the selected building' },
+    { key: 'K', label: 'Defender: salvage the selected building (again to cancel)' },
     { key: 'F', label: `Sentinel: Blink, then click a spot within ${DEFENDER.buildRange} tiles to teleport there, seen or not (${DEFENDER.blink.cooldown} s cooldown)` },
     { key: 'L-click', label: 'Select a building or unit · drag on the minimap to look around' },
-    { key: 'L-drag', label: 'Defender: box-select units (Shift adds to the selection) · Esc deselects' },
+    { key: 'L-drag', label: 'Defender: box-select units (Shift adds to the selection) · Ctrl+A selects all your troops · Esc deselects' },
     { key: '1–5', label: 'Defender: pick a building to place · Esc cancels' },
   ],
 });
@@ -3036,7 +3084,7 @@ function dec(v) {
 // The commands a player can send, by role. Each runs on the host as if that player clicked.
 const ROLE_COMMANDS = {
   attacker: ['commandAt', 'orderAttack', 'orderAttackMove', 'recall', 'buyItem', 'sellItem', 'tradeForPlatinum', 'hiddenDancingBlade', 'castGlimpse'],
-  defender: ['commandAt', 'placeOnTiles', 'upgradeBuilding', 'startSalvage', 'cancelSalvage', 'trainTroop', 'cancelTraining', 'hireWorker',
+  defender: ['commandAt', 'placeOnTiles', 'upgradeBuilding', 'startSalvage', 'cancelSalvage', 'toggleSalvage', 'trainTroop', 'cancelTraining', 'hireWorker',
     'dismissWorkers', 'workersMine', 'workersStop', 'stopTroops', 'toggleAutoRepair', 'blinkTo'],
 };
 const COMMANDS = {
@@ -3045,7 +3093,7 @@ const COMMANDS = {
   hiddenDancingBlade: () => hiddenDancingBlade(), castGlimpse: (...a) => castGlimpse(...a),
   placeOnTiles: (type, tiles) => placeOnTiles(type, tiles), // never the debug form
   upgradeBuilding: (...a) => upgradeBuilding(...a), startSalvage: (...a) => startSalvage(...a), cancelSalvage: (...a) => cancelSalvage(...a),
-  trainTroop: (...a) => trainTroop(...a), cancelTraining: (...a) => cancelTraining(...a), hireWorker: (...a) => hireWorker(...a),
+  toggleSalvage: (...a) => toggleSalvage(...a), trainTroop: (...a) => trainTroop(...a), cancelTraining: (...a) => cancelTraining(...a), hireWorker: (...a) => hireWorker(...a),
   dismissWorkers: (...a) => dismissWorkers(...a), workersMine: (...a) => workersMine(...a), workersStop: (...a) => workersStop(...a),
   stopTroops: (...a) => stopTroops(...a), toggleAutoRepair: () => toggleAutoRepair(), blinkTo: (...a) => blinkTo(...a),
 };
@@ -3150,7 +3198,7 @@ if (isClient) {
   recall = send('recall'); buyItem = send('buyItem'); sellItem = send('sellItem'); tradeForPlatinum = send('tradeForPlatinum');
   hiddenDancingBlade = send('hiddenDancingBlade'); castGlimpse = send('castGlimpse', () => armGlimpse(false));
   placeOnTiles = send('placeOnTiles'); upgradeBuilding = send('upgradeBuilding');
-  startSalvage = send('startSalvage'); cancelSalvage = send('cancelSalvage');
+  startSalvage = send('startSalvage'); cancelSalvage = send('cancelSalvage'); toggleSalvage = send('toggleSalvage');
   trainTroop = send('trainTroop'); cancelTraining = send('cancelTraining'); hireWorker = send('hireWorker');
   dismissWorkers = send('dismissWorkers'); workersMine = send('workersMine'); workersStop = send('workersStop'); stopTroops = send('stopTroops');
   toggleAutoRepair = send('toggleAutoRepair'); blinkTo = send('blinkTo', () => armBlink(false));

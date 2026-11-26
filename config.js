@@ -120,6 +120,9 @@ export const ATTACKER = { hp: 500, speed: 4.2, visionRadius: 10, damage: 10, att
 // Colossus outlasts the time to break a matched wall by about 1.6-2x at mid attack speed.
 // Items sell back for their full price (in the temple).
 export const INVENTORY_SLOTS = 6;
+// Early farming: the Colossus earns this many gold per point of damage it deals, by its best
+// Heavy Fists tier (0 = no Fists). Tiers not listed earn 1 gold per damage.
+export const GOLD_PER_DAMAGE = { 0: 2, 1: 1.5, 2: 1.25, 3: 1.2 };
 export const REGEN_DELAY = 4;
 const ITEM_PRICES = [400, 1200, 2800, 6000, 12400, 25200, 50800, 102000, 204400, 409200]; // gold
 // Platinum: the late-game currency for tiers XI-XV. The Colossus trades gold for it in its
@@ -288,7 +291,7 @@ export const UPGRADES = {
   cannon:   { stat: 'damage',       costs: [12, 24, 48, 96, 192, 384, 768, 1536, 3072, 6144, // starts at 2× the build cost (6)
     0, 0, 0, 0, 0],                 // 11-15: crystals only
     crystals: [0, 0, 0, 0, 0, 45, 45, 90, 180, 360, 1440, 2880, 2880, 5760, 5760],
-    mult: { 6: 1, 11: 4 },          // 6: the form's own bonus instead (variants); 11: the ×4 spike
+    mult: { 1: 2.5, 6: 1, 11: 4 },  // 1: makes up for the weaker level-1 Turret (20 → 50); 6: the form's own bonus instead (variants); 11: the ×4 spike
     // A Turret upgrade past its owner's Core level costs aheadMult times the stone for each level
     // ahead (Core 3: Turret level 3 normal price, level 4 ×4, level 5 ×16). Crystals are unchanged.
     aheadMult: 4,
@@ -405,7 +408,7 @@ export const BUILDINGS = {
   // range (tiles) and in line of sight (same cliff rules as vision: it can fire down a cliff,
   // not up one). damage per boulder, rate = shots per second, flight = seconds in the air.
   cannon:   { name: 'Turret', size: 1, hp: 75, height: 1.3, vision: 8, cost: 6,
-    attack: { range: 6, damage: 25, rate: 0.5, flight: 0.9 } },
+    attack: { range: 6, damage: 20, rate: 0.5, flight: 0.9 } }, // (level 2 is ×2.5: 50, as before)
   // crystalCost: crystals (the rare currency) to build it, on top of any stone cost.
   quarry:   { name: 'Quarry',   size: 2, hp: 75, height: 1.0, vision: 5, crystalCost: 10, perSentinel: 1 },
   wall:     { name: 'Wall',     size: 1, hp: 200, height: 1.2, vision: 2, cost: 3 },   // click-drag to draw a line; cost per piece
