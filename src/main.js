@@ -19,6 +19,7 @@ import { createColossusHud, createDefenderHud, createResourceBar, createInfoPane
 import { Minimap } from './ui/minimap.js';
 import { createDebugPanel, createToasts } from './ui/debug.js';
 import { runLobby, ROLES } from './net.js';
+import { createPointerLock } from './ui/pointerlock.js';
 import { NET } from './config.js';
 
 // ---- Multiplayer: ?lobby (host) or ?join=CODE opens the lobby first (src/net.js). ----
@@ -2488,6 +2489,15 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
 });
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+// Mouse lock (multi-monitor players): the cursor stays in the game window so edge scrolling
+// works. A click in the game locks it, Esc frees it, F9 turns it off/on. See ui/pointerlock.js.
+let lockTold = false;
+const mouseLock = createPointerLock({
+  lockOn: renderer.domElement,
+  onChange: (on) => {
+    if (on && !lockTold) { lockTold = true; showToast('Mouse locked to the game window · Esc frees it · F9 turns mouse lock off'); }
+  },
+});
 
 // Right-click (in the world or on the minimap): order the selected character to this tile.
 function commandAt(tile) {
@@ -2692,6 +2702,11 @@ function switchControl() {
 }
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
+  if (e.code === 'F9') { // mouse lock on / off (for everyone, spectators too)
+    e.preventDefault();
+    showToast(mouseLock.toggle() ? 'Mouse lock on: click the game to lock the mouse to the window' : 'Mouse lock off');
+    return;
+  }
   if (spectating && e.code !== 'Space') { if (e.code === 'Tab') e.preventDefault(); return; } // spectators only watch
   // Shop keys (1-3) pick an upgrade's tab, only while the shop window is open.
   const shopKey = controlled === attacker && colossusHud.shopOpen && SHOP.find((s) => e.code === `Digit${s.key}`);
@@ -2834,6 +2849,7 @@ const debug = createDebugPanel(uiRoot, {
     { key: 'C', label: 'Switch between the Colossus and the defender' },
     { key: 'Space', label: 'Center the camera on the selected character' },
     { key: 'Mouse to edge', label: 'Pan the camera (also arrow keys / middle-drag)' },
+    { key: 'F9', label: 'Mouse lock on / off: keeps the mouse inside the game window (for several monitors; Esc frees it, a click locks it again)' },
     { key: 'Q / E', label: 'Rotate the camera · Scroll: zoom' },
     { key: 'R-click', label: 'Move / attack (Colossus) / repair a damaged building or use a tunnel (defender); selected troops move or attack the Colossus; with a Barracks selected, sets its rally point; also on the minimap' },
     { key: 'X', label: 'Colossus: attack move, then click where to go (Esc / right-click cancels)' },

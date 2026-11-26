@@ -54,7 +54,7 @@ export class Minimap {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     this.canvas.addEventListener('pointerdown', (e) => {
       const p = toMap(e);
-      if (e.button === 0) { dragging = true; onNavigate(p.x, p.z); this.canvas.setPointerCapture(e.pointerId); }
+      if (e.button === 0) { dragging = true; onNavigate(p.x, p.z); try { this.canvas.setPointerCapture(e.pointerId); } catch { /* not while the mouse is locked */ } }
       else if (e.button === 2) onCommand(map.tileAt(p.x, p.z));
     });
     this.canvas.addEventListener('pointermove', (e) => { if (dragging) { const p = toMap(e); onNavigate(p.x, p.z); } });
